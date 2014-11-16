@@ -8,16 +8,24 @@ import com.google.appengine.api.datastore.KeyFactory;
 import com.google.appengine.api.datastore.Key;
 import com.google.appengine.api.datastore.Text;
 
-import java.security.MessageDigest;
+import java.io.UnsupportedEncodingException;
+
+import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 
+import java.util.Arrays;
 import java.util.List;
+
+import javax.crypto.Mac;
+
+import javax.crypto.spec.SecretKeySpec;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.POST;
+import javax.ws.rs.PUT;
 import javax.ws.rs.Produces;
 
 import javax.ws.rs.core.HttpHeaders;
@@ -30,16 +38,35 @@ import org.apache.commons.codec.binary.Base64;
 @Path("/{username}")
 public class PassioResource {
 
-	private MessageDigest messageDigest;
 	private DatastoreService datastore;
 
 	public PassioResource() throws NoSuchAlgorithmException {
 		this.datastore = DatastoreServiceFactory.getDatastoreService();
-		this.messageDigest = MessageDigest.getInstance("SHA-256");
 	}
 
 	private Key generateKey(String username) {
 		return KeyFactory.createKey("passio", username);
+	}
+
+	private boolean verifyMac(String text, byte[] expectedMac, byte[] key)
+	throws NoSuchAlgorithmException, InvalidKeyException, UnsupportedEncodingException {
+		SecretKeySpec keySpec = new SecretKeySpec(key, "HmacSHA1");
+
+		Mac mac = Mac.getInstance("HmacSHA1");
+		mac.init(keySpec);
+
+		byte[] actualMac = mac.doFinal(text.getBytes("UTF-8"));
+
+		return Arrays.equals(expectedMac, actualMac);
+	}
+
+	private String getSingleHeader(HttpHeaders headers, String key) {
+		List<String> keyHeaders = headers.getRequestHeaders().get(key);
+		if (keyHeaders != null && keyHeaders.size() == 1) {
+			return keyHeaders.get(0);
+		} else {
+			return null;
+		}
 	}
 
 	@GET
@@ -57,46 +84,63 @@ public class PassioResource {
 		return Response.ok(((Text) user.getProperty("value")).getValue()).build();
 	}
 
-	@POST
-	@Consumes(MediaType.TEXT_PLAIN)
-	public Response updateEntity(
-		String requestBody,
+	@PUT
+	public Response createEntity(
 		@PathParam("username") String username,
 		@Context HttpHeaders headers) {
 
-		List<String> authHeader = headers.getRequestHeaders().get("Authorization");
-		if (authHeader == null) {
+		String signingKey64 = getSingleHeader(headers, "X-Signing-Key");
+		if (signingKey64 == null) {
 			return Response.status(Response.Status.BAD_REQUEST)
-				.entity("No authorization provided")
-				.build();
-		} else if (authHeader.size() > 1) {
-			return Response.status(Response.Status.BAD_REQUEST)
-				.entity("Ambiguous authorization provided")
+				.entity("No signing key provided")
 				.build();
 		}
 
-		// we obtain the authentication token from the request headers and hash it again.
-		String auth64 = authHeader.get(0);
-		byte[] auth = Base64.decodeBase64(auth64);
-		auth = this.messageDigest.digest(auth);
-		auth64 = new String(Base64.encodeBase64(auth));
+		Entity user = new Entity(generateKey(username));
+		user.setProperty("signing-key", signingKey64);
+		user.setProperty("value", new Text(""));
+		datastore.put(user);
 
-		Key userKey = this.generateKey(username);
+		return Response.ok().build();
+	}
+
+	@POST
+	@Consumes(MediaType.TEXT_PLAIN)
+	public Response updateEntity(
+	String requestBody, @PathParam("username") String username, @Context HttpHeaders headers)
+	throws NoSuchAlgorithmException, InvalidKeyException, UnsupportedEncodingException {
+		String mac64 = getSingleHeader(headers, "X-MAC");
+		if (mac64 == null) {
+			return Response.status(Response.Status.BAD_REQUEST)
+				.entity("No MAC provided")
+				.build();
+		}
+
+		byte[] mac = Base64.decodeBase64(mac64);
+
 		Entity user;
-
 		try {
-			user = this.datastore.get(userKey);
+			user = datastore.get(generateKey(username));
 		} catch (EntityNotFoundException e) {
-			// user doesn't exist. we create a new entity for this user and set the authentication token to the one
-			// provided by the client
-			user = new Entity(userKey);
-			user.setProperty("auth", auth64);
+			return Response.status(Response.Status.NOT_FOUND).build();
 		}
 
-		if (!((String) user.getProperty("auth")).equals(auth64)) {
-			// if the authentication token stored with the user entity is different from the authentication token
-			// provided in the request, the client is not allowed to change this data.
-			return Response.status(Response.Status.FORBIDDEN).build();
+		if (user.hasProperty("signing-key")) {
+			// Make use of signing key
+			String signingKey64 = (String) user.getProperty("signing-key");
+			byte[] signingKey = Base64.decodeBase64(signingKey64);
+			if (!verifyMac(requestBody, mac, signingKey)) {
+				return Response.status(Response.Status.FORBIDDEN).build();
+			}
+		} else {
+			String signingKey64 = getSingleHeader(headers, "X-Signing-Key");
+			if (signingKey64 == null) {
+				return Response.status(Response.Status.BAD_REQUEST)
+					.entity("A signing key is required for legacy accounts")
+					.build();
+			}
+
+			user.setProperty("signing-key", signingKey64);
 		}
 
 		user.setProperty("value", new Text(requestBody));
