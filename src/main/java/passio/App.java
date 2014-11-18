@@ -1,6 +1,7 @@
 package passio;
 
-import java.security.NoSuchAlgorithmException;
+import com.google.appengine.api.datastore.DatastoreService;
+import com.google.appengine.api.datastore.DatastoreServiceFactory;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -13,12 +14,15 @@ public class App extends Application {
 	public Set<Object> getSingletons() {
 		Set<Object> singletons = new HashSet<>();
 
-		try {
-			singletons.add(new PassioResource());
-		} catch (NoSuchAlgorithmException e) {
-			throw new RuntimeException(e);
-		}
+		DatastoreService datastore = DatastoreServiceFactory.getDatastoreService();
 
+		DatastorePassioEntityFactory passioEntityFactory = new DatastorePassioEntityFactory();
+		passioEntityFactory.setDatastoreService(datastore);
+
+		PassioResource passioResource = new PassioResource();
+		passioResource.setPassioEntityFactory(passioEntityFactory);
+
+		singletons.add(passioResource);
 		singletons.add(new CorsResponseFilter());
 
 		return singletons;
