@@ -79,4 +79,24 @@ public class PassioEntity {
 		return mac.doFinal(valueBytes);
 	}
 
+	@Override
+	public boolean equals(Object o) {
+		if (this == o) return true;
+		if (o == null || getClass() != o.getClass()) return false;
+
+		PassioEntity that = (PassioEntity) o;
+
+		if (!name.equals(that.name)) return false;
+		if (!value.equals(that.value)) return false;
+		return Arrays.equals(signingKey, that.signingKey);
+
+	}
+
+	@Override
+	public int hashCode() {
+		int result = name.hashCode();
+		result = 31 * result + value.hashCode();
+		result = 31 * result + Arrays.hashCode(signingKey);
+		return result;
+	}
 }
