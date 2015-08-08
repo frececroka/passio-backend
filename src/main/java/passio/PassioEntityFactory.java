@@ -2,7 +2,9 @@ package passio;
 
 public interface PassioEntityFactory {
 
-	PassioEntity load(String name) throws PassioEntityNotFoundException, PassioEntityFactoryException;
-	void save(PassioEntity e) throws PassioEntityFactoryException;
+	PassioEntity load(String name) throws PassioEntityFactoryException;
+
+	boolean create(PassioEntity e) throws PassioEntityFactoryException;
+	boolean update(PassioEntity e) throws PassioEntityFactoryException;
 
 }

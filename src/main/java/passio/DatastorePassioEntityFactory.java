@@ -7,6 +7,7 @@ import com.google.appengine.api.datastore.KeyFactory;
 import com.google.appengine.api.datastore.Key;
 import com.google.appengine.api.datastore.Text;
 
+import com.google.appengine.api.datastore.Transaction;
 import org.apache.commons.codec.binary.Base64;
 
 public class DatastorePassioEntityFactory implements PassioEntityFactory {
@@ -35,11 +36,36 @@ public class DatastorePassioEntityFactory implements PassioEntityFactory {
 		return new PassioEntity(name, value, Base64.decodeBase64(signingKey64));
 	}
 
-	public void save(PassioEntity passioEntity) {
-		Entity entity = new Entity(generateKey(passioEntity.getName()));
-		entity.setProperty("signing-key", Base64.encodeBase64String(passioEntity.getSigningKey()));
-		entity.setProperty("value", new Text(passioEntity.getValue()));
-		datastore.put(entity);
+	public boolean create(PassioEntity passioEntity) {
+		Key entityKey = generateKey(passioEntity.getName());
+		Transaction txn = datastore.beginTransaction();
+		try {
+			datastore.get(entityKey);
+			return false;
+		} catch (EntityNotFoundException e) {
+			Entity entity = new Entity(entityKey);
+			entity.setProperty("signing-key", Base64.encodeBase64String(passioEntity.getSigningKey()));
+			entity.setProperty("value", new Text(passioEntity.getValue()));
+			datastore.put(entity);
+			return true;
+		} finally {
+			txn.commit();
+		}
+	}
+
+	public boolean update(PassioEntity passioEntity) {
+		Key entityKey = generateKey(passioEntity.getName());
+		Transaction txn = datastore.beginTransaction();
+		try {
+			Entity entity = datastore.get(entityKey);
+			entity.setProperty("value", new Text(passioEntity.getValue()));
+			datastore.put(entity);
+			return true;
+		} catch (EntityNotFoundException e) {
+			return false;
+		} finally {
+			txn.commit();
+		}
 	}
 
 }

@@ -29,7 +29,9 @@ public class PassioResource {
 	@ResponseStatus(HttpStatus.CREATED)
 	public void createEntity(@PathVariable("username") String username, @RequestHeader("X-Signing-Key") String signingKey64) {
 		PassioEntity passioEntity = new PassioEntity(username, Base64.decodeBase64(signingKey64));
-		passioEntityFactory.save(passioEntity);
+		if (!passioEntityFactory.create(passioEntity)) {
+			throw new EntityCreationForbidden(username);
+		}
 	}
 
 	@RequestMapping(method = RequestMethod.POST, consumes = "text/plain")
@@ -43,7 +45,7 @@ public class PassioResource {
 			throw new EntityUpdateForbidden(username);
 		}
 
-		passioEntityFactory.save(passioEntity);
+		passioEntityFactory.update(passioEntity);
 	}
 
 	private PassioEntity requirePassioEntity(String username) {
@@ -73,6 +75,27 @@ public class PassioResource {
 		public String getMessage() {
 			return String.format("Entity with name %s not found.", entityName);
 		}
+	}
+
+	@ResponseStatus(HttpStatus.FORBIDDEN)
+	private static class EntityCreationForbidden extends ClientError {
+
+		private final String entityName;
+
+		public EntityCreationForbidden(String entityName) {
+			this.entityName = entityName;
+		}
+
+		@Override
+		public String getCode() {
+			return "Entity_Creating_Forbidden";
+		}
+
+		@Override
+		public String getMessage() {
+			return String.format("Entity with name '%s' already exists.", entityName);
+		}
+
 	}
 
 	@ResponseStatus(HttpStatus.FORBIDDEN)
