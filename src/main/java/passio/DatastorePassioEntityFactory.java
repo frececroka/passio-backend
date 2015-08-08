@@ -11,7 +11,11 @@ import org.apache.commons.codec.binary.Base64;
 
 public class DatastorePassioEntityFactory implements PassioEntityFactory {
 
-	private DatastoreService datastore;
+	private final DatastoreService datastore;
+
+	public DatastorePassioEntityFactory(DatastoreService datastore) {
+		this.datastore = datastore;
+	}
 
 	private Key generateKey(String name) {
 		return KeyFactory.createKey("passio", name);
@@ -36,10 +40,6 @@ public class DatastorePassioEntityFactory implements PassioEntityFactory {
 		entity.setProperty("signing-key", Base64.encodeBase64String(passioEntity.getSigningKey()));
 		entity.setProperty("value", new Text(passioEntity.getValue()));
 		datastore.put(entity);
-	}
-
-	public void setDatastoreService(DatastoreService d) {
-		datastore = d;
 	}
 
 }

@@ -1,95 +1,99 @@
 package passio;
 
-import java.util.List;
-
-import javax.ws.rs.Consumes;
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Produces;
-
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-
 import org.apache.commons.codec.binary.Base64;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
 
-@Path("/{username}")
+@RestController
+@RequestMapping("/{username}")
 public class PassioResource {
 
+	@Autowired
 	private PassioEntityFactory passioEntityFactory;
 
-	private String getSingleHeader(HttpHeaders headers, String key) {
-		List<String> keyHeaders = headers.getRequestHeaders().get(key);
-		if (keyHeaders != null && keyHeaders.size() == 1) {
-			return keyHeaders.get(0);
-		} else {
-			return null;
-		}
+	@RequestMapping(method = RequestMethod.GET, produces = "text/plain")
+	@ResponseStatus(HttpStatus.OK)
+	public String getEntity(@PathVariable("username") String username) {
+		PassioEntity passioEntity = requirePassioEntity(username);
+		return passioEntity.getValue();
 	}
 
-	@GET
-	@Produces(MediaType.TEXT_PLAIN)
-	public Response getEntity(@PathParam("username") String username) {
-		try {
-			PassioEntity e = passioEntityFactory.load(username);
-		} catch (PassioEntityNotFoundException e) {
-			return Response.status(Response.Status.NOT_FOUND).build();
-		}
-
-		return Response.ok(e.getValue()).build();
-	}
-
-	@PUT
-	public Response createEntity(
-		@PathParam("username") String username,
-		@Context HttpHeaders headers) {
-
-		String signingKey64 = getSingleHeader(headers, "X-Signing-Key");
-		if (signingKey64 == null) {
-			return Response.status(Response.Status.BAD_REQUEST)
-				.entity("No signing key provided")
-				.build();
-		}
-
+	@RequestMapping(method = RequestMethod.PUT)
+	@ResponseStatus(HttpStatus.CREATED)
+	public void createEntity(@PathVariable("username") String username, @RequestHeader("X-Signing-Key") String signingKey64) {
 		PassioEntity passioEntity = new PassioEntity(username, Base64.decodeBase64(signingKey64));
 		passioEntityFactory.save(passioEntity);
-
-		return Response.ok().build();
 	}
 
-	@POST
-	@Consumes(MediaType.TEXT_PLAIN)
-	public Response updateEntity(
-	String requestBody, @PathParam("username") String username, @Context HttpHeaders headers) {
-		String mac64 = getSingleHeader(headers, "X-MAC");
-		if (mac64 == null) {
-			return Response.status(Response.Status.BAD_REQUEST)
-				.entity("No MAC provided")
-				.build();
-		}
-
+	@RequestMapping(method = RequestMethod.POST, consumes = "text/plain")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void updateEntity(@RequestBody String requestBody, @PathVariable("username") String username, @RequestHeader("X-MAC") String mac64) {
 		byte[] mac = Base64.decodeBase64(mac64);
 
-		try {
-			PassioEntity passioEntity = passioEntityFactory.load(username);
-		} catch (PassioEntityNotFoundException e) {
-			return Response.status(Response.Status.NOT_FOUND).build();
-		}
+		PassioEntity passioEntity = requirePassioEntity(username);
 
 		if (!passioEntity.setValue(requestBody, mac)) {
-			return Response.status(Response.Status.FORBIDDEN).build();
+			throw new EntityUpdateForbidden(username);
 		}
 
 		passioEntityFactory.save(passioEntity);
-		return Response.ok().build();
 	}
 
-	public void setPassioEntityFactory(PassioEntityFactory f) {
-		passioEntityFactory = f;
+	private PassioEntity requirePassioEntity(String username) {
+		try {
+			return passioEntityFactory.load(username);
+		} catch (PassioEntityNotFoundException e) {
+			throw new RequiredEntityNotFound(e, username);
+		}
+	}
+
+	@ResponseStatus(HttpStatus.NOT_FOUND)
+	private static class RequiredEntityNotFound extends ClientError {
+
+		private final String entityName;
+
+		public RequiredEntityNotFound(Throwable cause, String entityName) {
+			super(cause);
+			this.entityName = entityName;
+		}
+
+		@Override
+		public String getCode() {
+			return "Passio_Entity_Not_Found";
+		}
+
+		@Override
+		public String getMessage() {
+			return String.format("Entity with name %s not found.", entityName);
+		}
+	}
+
+	@ResponseStatus(HttpStatus.FORBIDDEN)
+	private static class EntityUpdateForbidden extends ClientError {
+
+		private final String entityName;
+
+		public EntityUpdateForbidden(String entityName) {
+			this.entityName = entityName;
+		}
+
+		@Override
+		public String getCode() {
+			return "Entity_Update_Forbidden";
+		}
+
+		@Override
+		public String getMessage() {
+			return String.format("Provided MAC is invalid for entity '%s'.", entityName);
+		}
+
 	}
 
 }

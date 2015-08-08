@@ -13,7 +13,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 public class PassioEntity {
 
-	private String name;
+	private final String name;
 	private String value;
 
 	private byte[] signingKey;
